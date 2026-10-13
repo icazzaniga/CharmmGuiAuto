@@ -3,7 +3,7 @@
 
 import selenium
 from selenium import webdriver
-from selenium.webdriver.firefox.firefox_binary import FirefoxBinary
+from selenium.webdriver.firefox.service import Service
 from selenium.webdriver.support.ui import Select
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -19,6 +19,7 @@ import random
 import string
 import traceback
 import subprocess
+import shutil
 
 class CharmmGuiAuto:
     def __init__(self, system, headless=True, path_out=None):
@@ -53,7 +54,13 @@ class CharmmGuiAuto:
         #options.headless = True
         if headless is True:
             options.add_argument("--headless")
-        self.driver = webdriver.Firefox(options=options)
+        # Use the firefox/geckodriver found on PATH (activate the conda env first);
+        # the snap Firefox cannot be driven by geckodriver.
+        ff_bin = shutil.which("firefox")
+        gecko = shutil.which("geckodriver")
+        if ff_bin:
+            options.binary_location = ff_bin
+        self.driver = webdriver.Firefox(options=options, service=Service(gecko) if gecko else Service())
         if system == 'membrane':
             self.driver.get('https://www.charmm-gui.org/?doc=input/membrane.bilayer')
         elif system == 'solution':
@@ -284,7 +291,7 @@ class CharmmGuiAuto:
                 self.driver.find_element(By.XPATH, '//*[@id="id_mutation_table"]/tr[2]/td[5]/input').click()
             self.driver.find_element(By.XPATH, '//input[@value="Add Mutation"]').click()
             resids = [i.get_attribute('id') for i in self.driver.find_elements(By.XPATH, '//select[starts-with(@id,"mutation_chain_")]') if i.is_displayed()]
-            resid = resids[-1][-1]
+            resid = resids[-1].split('_')[-1]
             Select(self.driver.find_element(By.ID, f'mutation_chain_{resid}')).select_by_value(chain)
             Select(self.driver.find_element(By.ID, f'mutation_rid_{resid}')).select_by_value(rid)
             Select(self.driver.find_element(By.ID, f'mutation_patch_{resid}')).select_by_value(aa)
@@ -325,7 +332,7 @@ class CharmmGuiAuto:
                 self.driver.find_element(By.ID, 'prot_checked').click()
             self.driver.find_element(By.XPATH, '//input[@value="Add Protonation"]').click()
             resids = [i.get_attribute('id') for i in self.driver.find_elements(By.XPATH, '//select[starts-with(@id,"prot_chain_")]') if i.is_displayed()]
-            resid = resids[-1][-1]
+            resid = resids[-1].split('_')[-1]
             Select(self.driver.find_element(By.ID, f'prot_chain_{resid}')).select_by_value(chain)
             Select(self.driver.find_element(By.ID, f'prot_res_{resid}')).select_by_value(res_i)
             Select(self.driver.find_element(By.ID, f'prot_rid_{resid}')).select_by_value(rid)
@@ -374,7 +381,7 @@ class CharmmGuiAuto:
                 self.driver.find_element(By.XPATH, '//*[@id="id_phos_table"]/tr[2]/td[5]/input').click()
             self.driver.find_element(By.XPATH, '//input[@value="Add Phosphorylation"]').click()
             resids = [i.get_attribute('id') for i in self.driver.find_elements(By.XPATH, '//select[starts-with(@id,"phos_chain_")]') if i.is_displayed()]
-            resid = resids[-1][-1]
+            resid = resids[-1].split('_')[-1]
             Select(self.driver.find_element(By.ID, f'phos_chain_{resid}')).select_by_value(chain)
             Select(self.driver.find_element(By.ID, f'phos_res_{resid}')).select_by_value(res_i)
             Select(self.driver.find_element(By.ID, f'phos_rid_{resid}')).select_by_value(rid)
@@ -422,7 +429,7 @@ class CharmmGuiAuto:
         resids = [i.get_attribute('id') for i in self.driver.find_elements(By.XPATH, '//select[starts-with(@id,"chem_res_")]') if i.is_displayed()]
         if len(resids) == 0:
             resids = [i.get_attribute('id') for i in self.driver.find_elements(By.XPATH, '//select[starts-with(@id,"chem_resid_")]') if i.is_displayed()]
-        resid = resids[-1][-1]
+        resid = resids[-1].split('_')[-1]
         try:
             if self.driver.find_element(By.ID, f'chem_res_{resid}').is_displayed():
                 Select(self.driver.find_element(By.ID, f'chem_res_{resid}')).select_by_value(sname)
@@ -557,6 +564,42 @@ class CharmmGuiAuto:
             self.GRS_reader(GRS, molecule_type, chain, residue, resid, skip=skip)
             self.nxt()
             self.driver.switch_to.window(main_window)
+
+    def add_lipid_tail(self, chain, rid, patch='CYSP'):
+        """
+        Covalently attaches a lipid tail to a protein residue (PDB Reader 'Add Lipid-tail').
+
+        Parameters:
+            chain (str): Segment ID as shown in the dropdown (e.g. 'PROA').
+            rid (str/int): Residue number.
+            patch (str): CYSP (palmitoylation, Cys), CYSF (farnesylation, Cys),
+                         CYSG (geranylgeranylation, Cys), CYSL (triacylation, N-terminal Cys),
+                         GLYM (myristoylation, N-terminal Gly), LYSM (myristoylation, Lys).
+                         GLYM and CYSL only accept the first residue of the chain.
+        """
+        if chain is None:
+            return
+        rid = str(rid)
+        if not self.driver.find_element(By.ID, 'id_ltl').is_displayed():
+            self.driver.find_element(By.ID, 'ltl_checked').click()
+            ### Removes the default (empty) row so only requested rows remain
+            self.driver.find_element(By.XPATH, '//*[@id="id_ltl_table"]/tr[2]/td[5]/input').click()
+        self.driver.find_element(By.XPATH, '//input[@value="Add Lipid-tail"]').click()
+        ids = [i.get_attribute('id') for i in self.driver.find_elements(By.XPATH, '//select[starts-with(@id,"ltl_patch_")]') if i.is_displayed()]
+        idx = ids[-1].split('_')[-1]
+        ### The page rebuilds the residue lists whenever patch or chain changes, so set those first;
+        ### choosing the residue number then fills in the amino-acid field automatically.
+        Select(self.driver.find_element(By.ID, f'ltl_patch_{idx}')).select_by_value(patch)
+        Select(self.driver.find_element(By.ID, f'ltl_chain_{idx}')).select_by_value(chain)
+        try:
+            Select(self.driver.find_element(By.ID, f'ltl_rid_{idx}')).select_by_value(rid)
+        except Exception as e:
+            raise ValueError(f"Lipid-tail {patch}: residue {rid} is not available in chain {chain} "
+                             f"(GLYM/CYSL accept only the first residue of the chain).") from e
+        ### Safety check: the amino acid must match the tail (CYSx->CYS, GLYM->GLY, LYSM->LYS)
+        aa = Select(self.driver.find_element(By.ID, f'ltl_res_{idx}')).first_selected_option.get_attribute('value')
+        if aa != patch[:3]:
+            raise ValueError(f"Lipid-tail {patch} needs a {patch[:3]} residue, but {chain} {rid} is {aa}.")
 
     def patch(self, chain=None, ter=None, ter_patch=None):
         """
@@ -730,7 +773,7 @@ class CharmmGuiAuto:
         os.system(f'rm -r {out_tmp}')
         print('Unpacked')
 
-    def manipulate_PDB(self, path=None, file_name=None, pdb_id=None, model=None, chains=None, hets=None, pH=None, preserve={'option': None}, mutations=None, protonations=None, disulfides=None, phosphorylations=None, gpi={'GRS': None}, glycans=None):
+    def manipulate_PDB(self, path=None, file_name=None, pdb_id=None, model=None, chains=None, hets=None, pH=None, preserve={'option': None}, mutations=None, protonations=None, disulfides=None, phosphorylations=None, gpi={'GRS': None}, glycans=None, lipid_tails=None, membrane_protein=False):
         """
         Manipulates a PDB file with various options.
 
@@ -749,6 +792,8 @@ class CharmmGuiAuto:
             phosphorylations (list): List of phosphorylations to add (optional).
             gpi (dict): GPI anchor options (default is {'GRS': None}).
             glycans (list): List of glycans to add (optional).
+            lipid_tails (list): Lipid-tails to attach, e.g. [{'chain': 'PROA', 'rid': 34, 'patch': 'CYSP'}] (optional).
+            membrane_protein (bool): Tick 'Is this a membrane protein?' so tails are placed in the bilayer core at Z=0 (default False).
 
         Returns:
             jobid (str): Job ID for the manipulated PDB file.
@@ -795,6 +840,11 @@ class CharmmGuiAuto:
         if glycans is not None:
             for glycan in glycans:
                 self.add_glycan(**glycan, skip=1)
+        if lipid_tails is not None:
+            for lipid_tail in lipid_tails:
+                self.add_lipid_tail(**lipid_tail)
+            if membrane_protein and not self.driver.find_element(By.ID, 'mprot_checked').is_selected():
+                self.driver.find_element(By.ID, 'mprot_checked').click()
         return jobid
         time.sleep(1000)
 
@@ -845,7 +895,7 @@ class Retrieve(CharmmGuiAuto):
             raise ValueError('A very specific bad thing happened.')
 
 class PDBReader(CharmmGuiAuto):
-    def run(self, email, password, path=None, screenshot=False, file_name=None, download_now=True, pdb_id=None, model=None, chains=None, hets=None, pH=None, preserve={'option': None}, mutations=None, protonations=None, disulfides=None, phosphorylations=None, gpi={'GRS': None}, glycans=None):
+    def run(self, email, password, path=None, screenshot=False, file_name=None, download_now=True, pdb_id=None, model=None, chains=None, hets=None, pH=None, preserve={'option': None}, mutations=None, protonations=None, disulfides=None, phosphorylations=None, gpi={'GRS': None}, glycans=None, lipid_tails=None, membrane_protein=False):
         """
         Runs the PDB Reader and manipulates a PDB file.
 
@@ -867,6 +917,8 @@ class PDBReader(CharmmGuiAuto):
             phosphorylations (list): List of phosphorylations to add (optional).
             gpi (dict): GPI anchor options (default is {'GRS': None}).
             glycans (list): List of glycans to add (optional).
+            lipid_tails (list): Lipid-tails to attach, e.g. [{'chain': 'PROA', 'rid': 34, 'patch': 'CYSP'}] (optional).
+            membrane_protein (bool): Tick 'Is this a membrane protein?' so tails are placed in the bilayer core at Z=0 (default False).
         """
         try:
             self.login(email, password)
@@ -877,7 +929,7 @@ class PDBReader(CharmmGuiAuto):
             else:
                 self.from_pdb(pdb_id)
             time.sleep(1)
-            jobid = self.manipulate_PDB(path, file_name, pdb_id, model, chains, hets, pH, preserve, mutations, protonations, disulfides, phosphorylations, gpi, glycans)
+            jobid = self.manipulate_PDB(path, file_name, pdb_id, model, chains, hets, pH, preserve, mutations, protonations, disulfides, phosphorylations, gpi, glycans, lipid_tails, membrane_protein)
             self.nxt(prev_step="PDB Manipulation", screen=screenshot, jobid=jobid)
             self.wait_text('Computed Energy')
             if download_now:
@@ -959,7 +1011,7 @@ class FFConverter(CharmmGuiAuto):
             raise ValueError('A very specific bad thing happened.')
 
 class PDBReaderFFConverter(CharmmGuiAuto):
-    def run(self, email, password, path=None, screenshot=False, file_name=None, download_now=True, pdb_id=None, model=None, hets=None, chains=None, het=None, pH=None, preserve={'option': None}, mutations=None, protonations=None, disulfides=None, phosphorylations=None, gpi={'GRS': None}, glycans=None, PBC=False, PBC_x=10, systype='Solution', ff='c36m', amber_options = None, engine='gmx', temp=310):
+    def run(self, email, password, path=None, screenshot=False, file_name=None, download_now=True, pdb_id=None, model=None, hets=None, chains=None, het=None, pH=None, preserve={'option': None}, mutations=None, protonations=None, disulfides=None, phosphorylations=None, gpi={'GRS': None}, glycans=None, lipid_tails=None, membrane_protein=False, PBC=False, PBC_x=10, systype='Solution', ff='c36m', amber_options = None, engine='gmx', temp=310):
         """
         Runs both the PDB Reader and Force Field Converter.
 
@@ -981,6 +1033,8 @@ class PDBReaderFFConverter(CharmmGuiAuto):
             phosphorylations (list): List of phosphorylations to add (optional).
             gpi (dict): GPI anchor options (default is {'GRS': None}).
             glycans (list): List of glycans to add (optional).
+            lipid_tails (list): Lipid-tails to attach, e.g. [{'chain': 'PROA', 'rid': 34, 'patch': 'CYSP'}] (optional).
+            membrane_protein (bool): Tick 'Is this a membrane protein?' so tails are placed in the bilayer core at Z=0 (default False).
             PBC (bool): Whether to set up periodic boundary conditions (default is False).
             PBC_x (float): Size of the PBC box (default is 10).
             systype (str): System type ('Solution', 'Bilayer', etc., default is 'Solution').
@@ -997,7 +1051,7 @@ class PDBReaderFFConverter(CharmmGuiAuto):
                 self.upload(file_name, path)
             else:
                 self.from_pdb(pdb_id)
-            jobid1 = self.manipulate_PDB(path, file_name, pdb_id, model, chains, het, pH, preserve, mutations, protonations, disulfides, phosphorylations, gpi, glycans)
+            jobid1 = self.manipulate_PDB(path, file_name, pdb_id, model, chains, het, pH, preserve, mutations, protonations, disulfides, phosphorylations, gpi, glycans, lipid_tails, membrane_protein)
             self.nxt(prev_step="PDB Manipulation", screen=screenshot, jobid=jobid1)
             self.wait_text('Computed Energy')
             print(f'Ready to download from retrieve job id {jobid1}')
@@ -1051,7 +1105,7 @@ class PDBReaderFFConverter(CharmmGuiAuto):
             raise ValueError('A very specific bad thing happened.')
 
 class SolutionProtein(CharmmGuiAuto):
-    def run(self, email, password, path=None, file_name=None, screenshot=False, download_now=True, pdb_id=None, model=None, chains=None, hets=None, pH=None, preserve={'option': None}, mutations=None, protonations=None, disulfides=None, phosphorylations=None, gpi={'GRS': None}, glycans=None, ions='NaCl', ff='c36m', amber_options = None, engine='gmx', temp='310', waterbox={'dis': 10.0}, ion_method=None):
+    def run(self, email, password, path=None, file_name=None, screenshot=False, download_now=True, pdb_id=None, model=None, chains=None, hets=None, pH=None, preserve={'option': None}, mutations=None, protonations=None, disulfides=None, phosphorylations=None, gpi={'GRS': None}, glycans=None, lipid_tails=None, membrane_protein=False, ions='NaCl', ff='c36m', amber_options = None, engine='gmx', temp='310', waterbox={'dis': 10.0}, ion_method=None):
         """
         Runs the Solution Protein setup and simulation.
 
@@ -1073,6 +1127,8 @@ class SolutionProtein(CharmmGuiAuto):
             phosphorylations (list): List of phosphorylations to add (optional).
             gpi (dict): GPI anchor options (default is {'GRS': None}).
             glycans (list): List of glycans to add (optional).
+            lipid_tails (list): Lipid-tails to attach, e.g. [{'chain': 'PROA', 'rid': 34, 'patch': 'CYSP'}] (optional).
+            membrane_protein (bool): Tick 'Is this a membrane protein?' so tails are placed in the bilayer core at Z=0 (default False).
             ions (str): Ion type (default is 'NaCl').
             ff (str): Force field type (default is 'c36m').
             amber_options (dict): AMBER FF options (default is None).
@@ -1095,7 +1151,7 @@ class SolutionProtein(CharmmGuiAuto):
             # self.model_select(model)
             # self.nxt()
             # self.wait_text("PDB Manipulation Options")
-            jobid = self.manipulate_PDB(path, file_name, pdb_id, model, chains, hets, pH, preserve, mutations, protonations, disulfides, phosphorylations, gpi, glycans)
+            jobid = self.manipulate_PDB(path, file_name, pdb_id, model, chains, hets, pH, preserve, mutations, protonations, disulfides, phosphorylations, gpi, glycans, lipid_tails, membrane_protein)
 
             # if chains is not None:
             #     for chain in chains:
@@ -1479,7 +1535,7 @@ class MembraneProtein(CharmmGuiAuto):
         time.sleep(2)
 
 
-    def run(self, email, password, path=None, file_name=None, screenshot=False, download_now=True, pdb_id=None, model=None, chains=None, hets=None, pH=None, preserve={'option': None}, mutations=None, protonations=None, disulfides=None, phosphorylations=None, gpi={'GRS': None}, glycans=None, orientation={'option':'PDB'}, position={'option': None}, area={'option': None}, projection={'option': None}, boxtype={'option': None}, lengthZ={'option': None}, lengthXY={'option': 'ratio', 'value': 100}, lipids=None, naas=None, pegs=None, glycolipids=None, size=100, ions='NaCl', ff='c36m', amber_options = None, engine='gmx', temp='310'):
+    def run(self, email, password, path=None, file_name=None, screenshot=False, download_now=True, pdb_id=None, model=None, chains=None, hets=None, pH=None, preserve={'option': None}, mutations=None, protonations=None, disulfides=None, phosphorylations=None, gpi={'GRS': None}, glycans=None, lipid_tails=None, membrane_protein=False, orientation={'option':'PDB'}, position={'option': None}, area={'option': None}, projection={'option': None}, boxtype={'option': None}, lengthZ={'option': None}, lengthXY={'option': 'ratio', 'value': 100}, lipids=None, naas=None, pegs=None, glycolipids=None, size=100, ions='NaCl', ff='c36m', amber_options = None, engine='gmx', temp='310'):
         """
         Runs the membrane protein setup and simulation.
 
@@ -1501,6 +1557,8 @@ class MembraneProtein(CharmmGuiAuto):
             phosphorylations (list): List of phosphorylations to add (optional).
             gpi (dict): GPI anchor options (default is {'GRS': None}).
             glycans (list): List of glycans to add (optional).
+            lipid_tails (list): Lipid-tails to attach, e.g. [{'chain': 'PROA', 'rid': 34, 'patch': 'CYSP'}] (optional).
+            membrane_protein (bool): Tick 'Is this a membrane protein?' so tails are placed in the bilayer core at Z=0 (default False).
             orientation (str): Orientation option (default is 'PDB').
             position (dict): Position options (default is {'option': None}).
             area (dict): Area options (default is {'option': None}).
@@ -1533,7 +1591,7 @@ class MembraneProtein(CharmmGuiAuto):
             # self.model_select(model)
             # self.nxt()
             # self.wait_text("PDB Manipulation Options")
-            jobid = self.manipulate_PDB(path, file_name, pdb_id, model, chains, hets, pH, preserve, mutations, protonations, disulfides, phosphorylations, gpi, glycans)
+            jobid = self.manipulate_PDB(path, file_name, pdb_id, model, chains, hets, pH, preserve, mutations, protonations, disulfides, phosphorylations, gpi, glycans, lipid_tails, membrane_protein)
 
             # if chains is not None:
             #     for chain in chains:
