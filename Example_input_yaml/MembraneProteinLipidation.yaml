@@ -1,0 +1,68 @@
+system_type:
+  system_type: MP
+system_info:
+  headless: false
+  path_out: ## INSERT YOUR OUTPUT PATH HERE ##
+details:
+  email: ## INSERT YOUR EMAIL FOR CHARMM-GUI HERE ##
+  password: ## INSERT YOUR PASSWORD FOR CHARMM-GUI HERE ##
+  path: ## INSERT YOUR INPUT PATH HERE ##
+
+  engine: gmx
+  ff: c36m
+  file_name: ##INSERT INPUT PDB IF YOU HAVE IT ##
+
+
+  protonations:
+    -     
+      chain: PROA
+      res_i: ASP
+      rid: '80'
+      res_p: ASPP
+  disulfides:
+    -     
+      chain1: PROA
+      rid1: '107'
+      chain2: PROA
+      rid2: '182'
+    -     
+      chain1: PROA
+      rid1: '399'
+      chain2: PROA
+      rid2: '401'
+  chains:
+  - - PROA
+    - first
+    - PROP
+  - - PROA
+    - last
+    - CT1
+
+  lipid_tails:
+    - {chain: PROA, rid: 443, patch: CYSP}   # palmitoylation of Cys34 in chain A
+  membrane_protein: true                    # place tails in the bilayer core (Z=0)
+ 
+  ions: NaCl
+  lipids:
+  -
+    lipid: chl1
+    upper: 35
+    lower: 35
+  -
+    lipid: dopc
+    upper: 10
+    lower: 10
+  -
+    lipid: dppc
+    upper: 10
+    lower: 10
+  -
+    lipid: popc
+    upper: 10
+    lower: 10
+  orientation:
+    option: PDB
+
+
+  size: 100
+  temp: 310
